@@ -1,0 +1,174 @@
+#include <Arduino_FreeRTOS.h>
+#include <queue.h>
+
+QueueHandle_t queueT1_T2;
+QueueHandle_t queueT1_T3;
+TaskHandle_t Handle_1_2_3;
+TaskHandle_t Handle_4;
+
+void Temperatura( void *pvParameters );
+void Servomotor(void *pvParameters);
+void Afisare_t(void *pvParameters);
+void Mod_manual(void *pvParameters);
+
+int interrupt = 0;
+
+void setup() {
+
+  pinMode(3, OUTPUT); // PWM pin (Servomotor)
+  pinMode(LED_BUILTIN, OUTPUT);
+  pinMode(2, INPUT); // Pin intrerupere
+  pinMode(A0, INPUT); // Pin potentiometru
+
+  attachInterrupt(digitalPinToInterrupt(2), intrerupere, RISING);
+
+  queueT1_T2 = xQueueCreate(1, sizeof(int));
+  queueT1_T3 = xQueueCreate(1, sizeof(int));
+
+  Serial.begin(9600);
+
+  xTaskCreate(
+    Temperatura
+    , "Task T1"
+    , 128
+    , NULL
+    , 2
+    , &Handle_1_2_3);
+
+  xTaskCreate(
+    Servomotor
+    , "Task T2"
+    , 128
+    , NULL
+    , 1
+    , &Handle_1_2_3);
+
+  xTaskCreate(
+    Afisare_t
+    , "Task T3"
+    , 128
+    , NULL
+    , 0
+    , &Handle_1_2_3);
+
+  xTaskCreate(
+    Mod_manual
+    , "Task T4"
+    , 128
+    , NULL
+    , 0
+    , &Handle_4);
+
+  vTaskSuspend(Handle_4);
+}
+
+void loop() {
+  // put your main code here, to run repeatedly:
+}
+
+void Temperatura(void *pvParameters)
+{
+  (void) pvParameters;
+
+  for (;;) // A Task shall never return or exit.
+  {
+    int val_Temp = analogRead(A3);
+    int temp_C = (val_Temp - 103) / 2;
+    if (val_Temp > 150)
+    {
+      temp_C = temp_C - 1;
+    }
+    if (val_Temp < 74)
+    {
+      temp_C = temp_C + 1;
+    }
+    xQueueSend(queueT1_T2, &temp_C, portMAX_DELAY);
+    xQueueSend(queueT1_T3, &temp_C, portMAX_DELAY);
+    vTaskDelay(200 / portTICK_PERIOD_MS );
+  }
+}
+
+void Servomotor(void *pvParameters)
+{
+  (void) pvParameters;
+  int read_val_Temp;
+  char output_buffer[50];
+  for (;;) // A Task shall never return or exit.
+  {
+    if (xQueueReceive(queueT1_T2, &read_val_Temp, portMAX_DELAY) == pdPASS)
+    {
+      if ( read_val_Temp >= 20 && read_val_Temp <= 25)
+      {
+        // 125...0 grade
+        // 126...1.44grade
+        // 187....89.3 grade
+        // 188....90.7 grade
+        // 250...180 grade
+
+        analogWrite(3, 187);
+      }
+      else if ( read_val_Temp < 20)
+      {
+        int i = 20 - read_val_Temp;
+        analogWrite(3, 187 - i);
+      }
+      else if ( read_val_Temp > 25)
+      {
+        int i = read_val_Temp - 25;
+        analogWrite(3, 188 + i);
+      }
+
+    }
+    vTaskDelay(300 / portTICK_PERIOD_MS );
+  }
+}
+
+void Afisare_t(void *pvParameters)
+{
+  (void) pvParameters;
+  int read_val_Temp;
+  char output_buffer[50];
+  for (;;) // A Task shall never return or exit.
+  {
+    if (xQueueReceive(queueT1_T3, &read_val_Temp, portMAX_DELAY) == pdPASS)
+    {
+      sprintf(output_buffer, "temperatura: %d C", read_val_Temp);
+      Serial.println(output_buffer);
+    }
+    vTaskDelay(1000 / portTICK_PERIOD_MS );
+  }
+}
+
+void intrerupere() {
+
+  if (interrupt == 0)
+  {
+    vTaskSuspend(Handle_1_2_3);
+    vTaskResume(Handle_4);
+    interrupt = 1;
+  }
+  else
+  {
+    digitalWrite(LED_BUILTIN, HIGH);
+    vTaskSuspend(Handle_4);
+    vTaskResume(Handle_1_2_3);
+    interrupt = 0;
+  }
+
+}
+
+void Mod_manual(void *pvParameters)
+{
+  (void) pvParameters;
+  int potentiometru;
+  char output_buffer[50];
+  for (;;) // A Task shall never return or exit.
+  {
+    sprintf(output_buffer, "mod manual");
+    Serial.println(output_buffer);
+    digitalWrite(LED_BUILTIN, LOW);
+    potentiometru = analogRead(A0);
+    analogWrite(3, potentiometru / 4);
+    vTaskDelay(300 / portTICK_PERIOD_MS );
+  }
+}
